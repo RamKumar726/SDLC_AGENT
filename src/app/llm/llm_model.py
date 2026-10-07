@@ -1,7 +1,9 @@
-from langchain_groq import ChatGroq
+from langchain_openai import AzureChatOpenAI
 from app.configuration.config import Config
 
 class LLMModel:
     def create_llm(self):
-        llm = ChatGroq(model = "openai/gpt-oss-120b",max_retries = 5)
+        llm = AzureChatOpenAI(
+            azure_deployment="gpt-4.1-mini",
+        )
         return llm
