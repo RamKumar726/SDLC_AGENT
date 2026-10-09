@@ -1,0 +1,484 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SDLC Agent</title>
+
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: #1f2937;
+      background: #f8fafc;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 32px 16px 64px;
+    }
+
+    h1, h2, h3 {
+      color: #111827;
+    }
+
+    .card {
+      margin-top: 20px;
+      padding: 24px;
+      background: white;
+      border: 1px solid #e5e7eb;
+      border-radius: 12px;
+      box-shadow: 0 2px 8px rgb(15 23 42 / 4%);
+    }
+
+    label {
+      display: block;
+      margin-top: 16px;
+      font-weight: 600;
+    }
+
+    textarea {
+      display: block;
+      width: 100%;
+      min-height: 140px;
+      margin-top: 8px;
+      padding: 12px;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      font: inherit;
+      resize: vertical;
+    }
+
+    button {
+      margin-top: 16px;
+      padding: 10px 16px;
+      border: 0;
+      border-radius: 8px;
+      color: white;
+      background: #2563eb;
+      font: inherit;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    button:hover:not(:disabled) {
+      background: #1d4ed8;
+    }
+
+    button:disabled {
+      cursor: wait;
+      opacity: 0.6;
+    }
+
+    .muted {
+      color: #64748b;
+      overflow-wrap: anywhere;
+    }
+
+    #status {
+      min-height: 1.5em;
+      color: #1d4ed8;
+    }
+
+    #error {
+      color: #b91c1c;
+      white-space: pre-wrap;
+    }
+
+    #answerCard, #resultCard, #workflowCard {
+      display: none;
+    }
+
+    .result-section {
+      margin-top: 20px;
+      padding: 16px;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      background: #fff;
+    }
+
+    .result-section h3 {
+      margin-top: 0;
+      text-transform: capitalize;
+    }
+
+    .result-section h4 {
+      margin-bottom: 6px;
+      text-transform: capitalize;
+    }
+
+    .result-list {
+      padding-left: 24px;
+    }
+
+    .result-list li {
+      margin: 6px 0;
+    }
+
+    .result-field {
+      margin: 12px 0;
+    }
+
+    .result-label {
+      font-weight: 600;
+      text-transform: capitalize;
+    }
+
+    .result-value {
+      margin-top: 4px;
+      overflow-wrap: anywhere;
+    }
+  </style>
+</head>
+
+<body>
+  <header>
+    <h1>SDLC Agent</h1>
+    <p>
+      Describe your application idea. The agent may ask questions before
+      generating a software design and implementation plan.
+    </p>
+  </header>
+
+  <main>
+    <section class="card" id="ideaCard">
+      <form id="ideaForm">
+        <label for="idea">Application idea</label>
+        <textarea
+          id="idea"
+          required
+          placeholder="For example: A hospital app where patients can book appointments, consult doctors online, and pay consultation fees."
+        ></textarea>
+        <button id="startButton" type="submit">Start workflow</button>
+      </form>
+    </section>
+
+    <section class="card" id="workflowCard">
+      <h2>Workflow</h2>
+      <p class="muted">
+        Workflow ID: <span id="threadId"></span>
+      </p>
+      <p id="status" role="status" aria-live="polite"></p>
+      <p id="error" role="alert"></p>
+    </section>
+
+    <section class="card" id="answerCard">
+      <h2>Clarification needed</h2>
+      <p id="question"></p>
+      <form id="answerForm">
+        <label for="answer">Your answer</label>
+        <textarea id="answer" required></textarea>
+        <button id="answerButton" type="submit">Submit answer</button>
+      </form>
+    </section>
+
+    <section class="card" id="resultCard">
+      <h2>Workflow result</h2>
+      <div id="result"></div>
+      <button id="newWorkflowButton" type="button">Start a new workflow</button>
+    </section>
+  </main>
+
+  <script>
+    const ideaCard = document.querySelector("#ideaCard");
+    const ideaForm = document.querySelector("#ideaForm");
+    const answerForm = document.querySelector("#answerForm");
+    const answerCard = document.querySelector("#answerCard");
+    const resultCard = document.querySelector("#resultCard");
+    const workflowCard = document.querySelector("#workflowCard");
+    const statusElement = document.querySelector("#status");
+    const errorElement = document.querySelector("#error");
+
+    let threadId = null;
+
+    function formatLabel(value) {
+      return String(value)
+        .replaceAll("_", " ")
+        .replace(/\b\w/g, (letter) => letter.toUpperCase());
+    }
+
+    function renderValue(value, parent) {
+      if (value === null || value === undefined || value === "") {
+        const empty = document.createElement("span");
+        empty.textContent = "Not provided";
+        parent.appendChild(empty);
+        return;
+      }
+
+      if (Array.isArray(value)) {
+        if (value.length === 0) {
+          const empty = document.createElement("span");
+          empty.textContent = "None";
+          parent.appendChild(empty);
+          return;
+        }
+
+        const list = document.createElement("ul");
+        list.className = "result-list";
+
+        for (const item of value) {
+          const listItem = document.createElement("li");
+          renderValue(item, listItem);
+          list.appendChild(listItem);
+        }
+
+        parent.appendChild(list);
+        return;
+      }
+
+      if (typeof value === "object") {
+        for (const [key, nestedValue] of Object.entries(value)) {
+          const field = document.createElement("div");
+          field.className = "result-field";
+
+          const label = document.createElement("div");
+          label.className = "result-label";
+          label.textContent = formatLabel(key);
+
+          const content = document.createElement("div");
+          content.className = "result-value";
+          renderValue(nestedValue, content);
+
+          field.append(label, content);
+          parent.appendChild(field);
+        }
+        return;
+      }
+
+      const text = document.createElement("span");
+      text.textContent = String(value);
+      parent.appendChild(text);
+    }
+
+    function renderResult(result) {
+      const resultContainer = document.querySelector("#result");
+      resultContainer.replaceChildren();
+
+      if (!result || typeof result !== "object") {
+        renderValue(result, resultContainer);
+        return;
+      }
+
+      for (const [key, value] of Object.entries(result)) {
+        const section = document.createElement("section");
+        section.className = "result-section";
+
+        const heading = document.createElement("h3");
+        heading.textContent = formatLabel(key);
+
+        const content = document.createElement("div");
+        renderValue(value, content);
+
+        section.append(heading, content);
+        resultContainer.appendChild(section);
+      }
+    }
+
+    function showWorkflowResponse(data) {
+      threadId = data.thread_id || threadId;
+
+      if (threadId) {
+        workflowCard.style.display = "block";
+        document.querySelector("#threadId").textContent = threadId;
+      }
+
+      if (data.event === "question" || data.question) {
+        answerCard.style.display = "block";
+        resultCard.style.display = "none";
+        document.querySelector("#question").textContent = data.question;
+        document.querySelector("#answer").value = "";
+        statusElement.textContent = "Please answer the question to continue.";
+        document.querySelector("#answer").focus();
+        return;
+      }
+
+      if (data.event === "result" || data.result !== undefined) {
+        answerCard.style.display = "none";
+        resultCard.style.display = "block";
+        statusElement.textContent = "Workflow complete.";
+        renderResult(data.result);
+        return;
+      }
+
+      throw new Error("The workflow stream ended without a question or result.");
+    }
+
+    async function readWorkflowStream(url, body) {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "text/event-stream",
+        },
+        body: JSON.stringify({
+          ...body,
+          enable_streaming: true,
+        }),
+      });
+
+      if (!response.ok) {
+        const responseText = await response.text();
+        let message = responseText;
+
+        try {
+          const errorData = JSON.parse(responseText);
+          message = errorData.detail || responseText;
+        } catch {
+          // The response body was not JSON; show its text as the error.
+        }
+
+        throw new Error(message || `Request failed (${response.status}).`);
+      }
+
+      if (!response.body) {
+        throw new Error("This browser did not provide a readable response stream.");
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let terminalEvent = null;
+
+      function processEventBlock(block) {
+        let eventName = "message";
+        const dataLines = [];
+
+        for (const line of block.split("\n")) {
+          if (line.startsWith("event:")) {
+            eventName = line.slice("event:".length).trim();
+          } else if (line.startsWith("data:")) {
+            dataLines.push(line.slice("data:".length).trimStart());
+          }
+        }
+
+        if (dataLines.length === 0) return;
+
+        const data = JSON.parse(dataLines.join("\n"));
+
+        if (eventName === "started") {
+          threadId = data.thread_id;
+          document.querySelector("#threadId").textContent = threadId;
+          return;
+        }
+
+        if (eventName === "progress") {
+          statusElement.textContent = data.step
+            ? `Working: ${data.step}...`
+            : "Working...";
+          return;
+        }
+
+        if (eventName === "error") {
+          throw new Error(data.message || "The workflow failed.");
+        }
+
+        if (eventName === "question" || eventName === "result") {
+          terminalEvent = { ...data, event: eventName };
+        }
+      }
+
+      while (true) {
+        const { value, done } = await reader.read();
+
+        buffer += decoder.decode(value || new Uint8Array(), {
+          stream: !done,
+        });
+
+        buffer = buffer.replace(/\r\n/g, "\n");
+
+        let separatorIndex = buffer.indexOf("\n\n");
+        while (separatorIndex !== -1) {
+          const block = buffer.slice(0, separatorIndex);
+          buffer = buffer.slice(separatorIndex + 2);
+
+          processEventBlock(block);
+          separatorIndex = buffer.indexOf("\n\n");
+        }
+
+        if (done) break;
+      }
+
+      if (buffer.trim()) {
+        processEventBlock(buffer);
+      }
+
+      if (!terminalEvent) {
+        throw new Error("The server closed the stream without a question or result.");
+      }
+
+      return terminalEvent;
+    }
+
+    ideaForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      errorElement.textContent = "";
+      statusElement.textContent = "Connecting to the workflow...";
+      workflowCard.style.display = "block";
+
+      const button = document.querySelector("#startButton");
+      button.disabled = true;
+
+      try {
+        const data = await readWorkflowStream("/api/workflows", {
+          user_idea: document.querySelector("#idea").value.trim(),
+        });
+
+        ideaCard.style.display = "none";
+        showWorkflowResponse(data);
+      } catch (error) {
+        errorElement.textContent = error.message;
+        statusElement.textContent = "Could not complete the workflow.";
+      } finally {
+        button.disabled = false;
+      }
+    });
+
+    answerForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+
+      if (!threadId) {
+        errorElement.textContent = "No workflow ID is available. Start a new workflow.";
+        return;
+      }
+
+      errorElement.textContent = "";
+      statusElement.textContent = "Sending your answer...";
+
+      const button = document.querySelector("#answerButton");
+      button.disabled = true;
+
+      try {
+        const data = await readWorkflowStream(
+          `/api/workflows/${encodeURIComponent(threadId)}/resume`,
+          { answer: document.querySelector("#answer").value.trim() }
+        );
+
+        showWorkflowResponse(data);
+      } catch (error) {
+        errorElement.textContent = error.message;
+        statusElement.textContent = "Could not continue the workflow.";
+      } finally {
+        button.disabled = false;
+      }
+    });
+
+    document.querySelector("#newWorkflowButton").addEventListener("click", () => {
+      threadId = null;
+      ideaForm.reset();
+      answerForm.reset();
+      answerCard.style.display = "none";
+      resultCard.style.display = "none";
+      workflowCard.style.display = "none";
+      ideaCard.style.display = "block";
+      statusElement.textContent = "";
+      errorElement.textContent = "";
+      document.querySelector("#result").replaceChildren();
+    });
+  </script>
+</body>
+</html>
